@@ -40,6 +40,7 @@ import constants
 
 import matplotlib.pyplot as plt    # draw result. by cococat 2021.12.28
 import os
+import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint', required=True, help='Path to pretrained checkpoint')
@@ -82,6 +83,7 @@ def process_image(img_file, bbox_file, openpose_file, input_res=224):
     """
     normalize_img = Normalize(mean=constants.IMG_NORM_MEAN, std=constants.IMG_NORM_STD)
     img = cv2.imread(img_file)[:,:,::-1].copy() # PyTorch does not support negative stride at the moment
+    img_origincv = cv2.imread(img_file)
     if bbox_file is None and openpose_file is None:
         # Assume that the person is centerered in the image
         height = img.shape[0]
@@ -97,7 +99,10 @@ def process_image(img_file, bbox_file, openpose_file, input_res=224):
     img = img.astype(np.float32) / 255.
     img = torch.from_numpy(img).permute(2,0,1)
     norm_img = normalize_img(img.clone())[None]
-    return img, norm_img
+    # torch.cat([a,b],dim=0)
+
+    img_origincv = crop(img_origincv, center, scale, (input_res, input_res))
+    return img, norm_img, img_origincv
 
 def save_smpl_obj(filename, vertices, faces=None, colors=None):
     """保存smpl obj文件"""
@@ -174,10 +179,13 @@ def draw_skeleton(image, points, skeleton, color_palette='Set2', palette_samples
             np.array(plt.get_cmap(color_palette)(np.linspace(0, 1, palette_samples))) * 255
         ).astype(np.uint8)[:, -2::-1].tolist()
 
+    bias = constants.IMG_RES // 2
+
     for i, joint in enumerate(skeleton):
         pt1, pt2 = points[joint]
         image = cv2.line(
-            image, (int(pt1[0]), int(pt1[1])), (int(pt2[0]), int(pt2[1])),
+            # image, (int(pt1[0]), int(pt1[1])), (int(pt2[0]), int(pt2[1])),
+            image, (int(pt1[0]) + bias, int(pt1[1]) + bias), (int(pt2[0]) + bias, int(pt2[1]) + bias),
             tuple(colors[person_index % len(colors)]), 2
         )
 
@@ -217,9 +225,11 @@ def draw_points(image, points, color_palette='tab20', palette_samples=16, confid
     circle_size = max(1, min(image.shape[:2]) // 160)  # ToDo Shape it taking into account the size of the detection
     # circle_size = max(2, int(np.sqrt(np.max(np.max(points, axis=0) - np.min(points, axis=0)) // 16)))
 
+    bias = constants.IMG_RES // 2
+
     for i, pt in enumerate(points):
-        # if pt[2] > confidence_threshold:
-        image = cv2.circle(image, (int(pt[0]), int(pt[1])), circle_size, tuple(colors[i % len(colors)]), -1)
+        if i <= 18:
+            image = cv2.circle(image, (int(pt[0]) + bias, int(pt[1]) + bias), circle_size, tuple(colors[i % len(colors)]), -1)
 
     return image
 
@@ -316,6 +326,38 @@ def convertFromWorld2Cam(points_world, camera_T):
     return pt_cam
 
 
+def perspective_projection(points, rotation, translation,
+                           focal_length, camera_center):
+    """
+    This function computes the perspective projection of a set of points.
+    Input:
+        points (bs, N, 3): 3D points
+        rotation (bs, 3, 3): Camera rotation
+        translation (bs, 3): Camera translation
+        focal_length (bs,) or scalar: Focal length
+        camera_center (bs, 2): Camera center
+    """
+    # TODO: batchsize!
+    batch_size = points.shape[0]
+    K = torch.zeros([batch_size, 3, 3], device=torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu'))
+    K[:,0,0] = focal_length
+    K[:,1,1] = focal_length
+    K[:,2,2] = 1.
+    K[:,:-1, -1] = camera_center
+
+    # Transform points
+    points = torch.einsum('bij,bkj->bki', rotation, points)
+    points = points + translation.unsqueeze(1)
+
+    # Apply perspective distortion
+    projected_points = points / points[:,:,-1].unsqueeze(-1)
+
+    # Apply camera intrinsics
+    projected_points = torch.einsum('bij,bkj->bki', K, projected_points)
+
+    return projected_points[:, :, :-1]
+
+
 if __name__ == '__main__':
     args = parser.parse_args()
     
@@ -332,39 +374,54 @@ if __name__ == '__main__':
                 create_transl=False).to(device)
     model.eval()
 
-    # Setup renderer for visualization
-    renderer = Renderer(focal_length=constants.FOCAL_LENGTH, img_res=constants.IMG_RES, faces=smpl.faces)
+    # # Setup renderer for visualization
+    # renderer = Renderer(focal_length=constants.FOCAL_LENGTH, img_res=constants.IMG_RES, faces=smpl.faces)
 
-    # Preprocess input image and generate predictions
-    img, norm_img = process_image(args.img, args.bbox, args.openpose, input_res=constants.IMG_RES)
-    with torch.no_grad():
-        pred_rotmat, pred_betas, pred_camera = model(norm_img.to(device))   # 人体参数
-        pred_output = smpl(betas=pred_betas, body_pose=pred_rotmat[:,1:], global_orient=pred_rotmat[:,0].unsqueeze(1), pose2rot=False)
-        pred_vertices = pred_output.vertices
-        
-    # Calculate camera parameters for rendering
-    camera_translation = torch.stack([pred_camera[:,1], pred_camera[:,2], 2*constants.FOCAL_LENGTH/(constants.IMG_RES * pred_camera[:,0] +1e-9)],dim=-1)
-    camera_translation = camera_translation[0].cpu().numpy()
-    pred_vertices = pred_vertices[0].cpu().numpy()  # 顶点 保存成obj 
-    img = img.permute(1,2,0).cpu().numpy()
+    cv2.namedWindow("image", 0)
 
-    save_smpl_obj("/home/pose/Workspace/Python/Test/test.obj", pred_vertices)
+    while True:
+        t = time.time()
+        # Preprocess input image and generate predictions
+        img, norm_img, img_originColor = process_image(args.img, args.bbox, args.openpose, input_res=constants.IMG_RES)
+        with torch.no_grad():
+            pred_rotmat, pred_betas, pred_camera = model(norm_img.to(device))   # 人体参数
+            pred_output = smpl(betas=pred_betas, body_pose=pred_rotmat[:,1:], global_orient=pred_rotmat[:,0].unsqueeze(1), pose2rot=False)
+            pred_vertices = pred_output.vertices
+            
+        # Calculate camera parameters for rendering
+        camera_translation = torch.stack([pred_camera[:,1], pred_camera[:,2], 2*constants.FOCAL_LENGTH/(constants.IMG_RES * pred_camera[:,0] +1e-9)],dim=-1)
+        # camera_translation = camera_translation[0].cpu().numpy()  # note: new projection requires torch but not numpy
+        pred_vertices = pred_vertices[0].cpu().numpy()  # 顶点 保存成obj 
+        img = img.permute(1,2,0).cpu().numpy()
 
-    test_joints = pred_output.joints
-    test_joints = test_joints[0].cpu().numpy()
-    save_smpl_obj_jointOnly("/home/pose/Workspace/Python/Test/joint49.obj", test_joints)
+        # save_smpl_obj("/home/pose/Workspace/Python/Test/test.obj", pred_vertices)
 
-    result_img = cv2.imread(args.img)
-    cam_joints = convertFromWorld2Cam(test_joints[:19], camera_translation)
-    img_joints = convertFromCam2Image(cam_joints, result_img.shape[1] / 2, result_img.shape[0] / 2)
-    cv2.namedWindow("image")
-    # cv2.imshow('image', result_img)
-    # cv2.waitKey(0)
-    result_img = draw_points_and_skeleton(result_img, img_joints, skeleton)
-    cv2.imshow('image', result_img)
-    cv2.waitKey(0)
+        test_joints = pred_output.joints
+        # test_joints = test_joints[0].cpu().numpy()    # note: new projection requires torch but not numpy
+        # save_smpl_obj_jointOnly("/home/pose/Workspace/Python/Test/joint49.obj", test_joints)
 
-    
+        # cam_joints = convertFromWorld2Cam(test_joints[:19], camera_translation)
+        # img_joints = convertFromCam2Image(cam_joints, img.shape[0] / 2, img.shape[1] / 2)
+
+        # result_img = cv2.imread(args.img)
+        # result_img = draw_points_and_skeleton(result_img, img_joints, skeleton)
+        batch_size = 1
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # img_joints = perspective_projection(test_joints[:19],
+        img_joints = perspective_projection(test_joints,
+                                            rotation=torch.eye(3, device=device).unsqueeze(0).expand(batch_size, -1, -1),
+                                            # rotation=torch.eye(3, device=self.device).unsqueeze(0).expand(batch_size, -1, -1),
+                                            translation=camera_translation,
+                                            focal_length=constants.FOCAL_LENGTH,
+                                            camera_center=torch.zeros(batch_size, 2, device=device))
+
+        img_joints_numpy = img_joints[0].cpu().numpy()
+        result_img = draw_points_and_skeleton(img_originColor, img_joints_numpy, skeleton)
+
+        cv2.imshow('image', result_img)
+        cv2.waitKey(1)
+        fps = 1. / (time.time() - t)
+        print('\rframerate: %f fps' % fps, end='')
     # # Render parametric shape
     # img_shape = renderer(pred_vertices, camera_translation, img)
     
