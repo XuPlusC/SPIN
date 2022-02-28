@@ -394,7 +394,7 @@ if __name__ == '__main__':
         pred_vertices = pred_vertices[0].cpu().numpy()  # 顶点 保存成obj 
         img = img.permute(1,2,0).cpu().numpy()
 
-        # save_smpl_obj("/home/pose/Workspace/Python/Test/test.obj", pred_vertices)
+        save_smpl_obj("/home/pose/Workspace/Python/Test/test.obj", pred_vertices)
 
         test_joints = pred_output.joints
         # test_joints = test_joints[0].cpu().numpy()    # note: new projection requires torch but not numpy
