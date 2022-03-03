@@ -52,7 +52,7 @@ def process_image(img_input_rgb, bbox_list, input_res=224):
         box_center = np.array([box[0][0] + box_width / 2, box[0][1] + box_height / 2])
         box_scale = box_width / 200.0
         temp_crop_img = crop(img, box_center, box_scale, (input_res, input_res))
-        cv2.imwrite('batch.png', temp_crop_img[:,:,::-1])
+        # cv2.imwrite('batch.png', temp_crop_img[:,:,::-1])
         temp_crop_img = temp_crop_img.astype(np.float32) / 255.
         temp_crop_img = torch.from_numpy(temp_crop_img).permute(2, 0, 1)
         norm_img = normalize_img(temp_crop_img.clone())[None]

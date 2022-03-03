@@ -1,3 +1,7 @@
+from cgi import test
+from ntpath import join
+from zipfile import ZipFile
+from matplotlib import projections
 import torchvision
 import cv2
 import torch
@@ -11,6 +15,7 @@ from utils.imutils import crop
 import config
 import constants
 import matplotlib.pyplot as plt    # draw result. by cococat 2021.12.28
+from mpl_toolkits.mplot3d import Axes3D
 import time
 import frame_pose
 
@@ -167,6 +172,42 @@ def get_person_detection_boxes(model, img, threshold=0.5):
     return person_boxes
 
 
+def readMatrixFromFile(filepath):
+    # ret = np.array([])
+    # with open(filepath, 'r') as f:
+    #     my_data = f.readlines()  # txt中所有字符串读入data，得到的是一个list
+    #     # 对list中的数据做分隔和类型转换
+    #     for line in my_data:
+    #         line_data = line.split()
+    #         ret += np.array(line_data)
+    ret = np.loadtxt(filepath)
+    return ret
+
+
+def transFromImage2Camera(K_matrix, pt, C_matrix):
+    ret = np.array([
+        (pt[0] - K_matrix[0][2]) * pt[2] / K_matrix[0][0],
+        (pt[1] - K_matrix[1][2]) * pt[2] / K_matrix[1][1],
+        1.0
+    ])
+    # ret += (pt[0] - K_matrix[0][2]) * pt[2] / K_matrix[0][0]
+    # ret += (pt[1] - K_matrix[1][2]) * pt[2] / K_matrix[1][1]
+    # ret += 1.0
+    return ret
+
+
+def transFromCamera2World(R_matrix, C_matrix, pt):
+    ret = np.array([
+        R_matrix[0][0] * pt[0] + R_matrix[1][0] * pt[1] + R_matrix[2][0] * pt[2] + C_matrix[0],
+        R_matrix[0][1] * pt[0] + R_matrix[1][1] * pt[1] + R_matrix[2][1] * pt[2] + C_matrix[1],
+        R_matrix[0][2] * pt[0] + R_matrix[1][2] * pt[1] + R_matrix[2][2] * pt[2] + C_matrix[2]
+    ])
+    # ret += R_matrix[0][0] * pt[0] + R_matrix[1][0] * pt[1] + R_matrix[2][0] * pt[2] + C_matrix[0]
+    # ret += R_matrix[0][1] * pt[0] + R_matrix[1][1] * pt[1] + R_matrix[2][1] * pt[2] + C_matrix[1]
+    # ret += R_matrix[0][2] * pt[0] + R_matrix[1][2] * pt[1] + R_matrix[2][2] * pt[2] + C_matrix[2]
+    return ret
+
+
 if __name__ == "__main__":
 
     args = parser.parse_args()
@@ -187,9 +228,12 @@ if __name__ == "__main__":
                 create_transl=False).to(device)
     model.eval()
 
-    cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/67")
-    # cap = cv2.VideoCapture("/home/pose/Videos/dance.mp4")o
-    # cap = cv2.VideoCapture("/home/pose/Videos/short.mp4")
+    # cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/67")
+    # cap = cv2.VideoCapture("/home/pose/Desktop/VID_20220226_153226.mp4")
+    cap = cv2.VideoCapture("/home/pose/Videos/short.mp4")
+    # cap = cv2.VideoCapture("/home/pose/Desktop/showcase_fall_mosaic.mp4")
+    # cap = cv2.VideoCapture("/home/pose/Desktop/跌到视频（马赛克）.mp4")
+
     input_width, input_height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     # Frame extraction
@@ -200,16 +244,36 @@ if __name__ == "__main__":
     input_FPS = cap.get((cv2.CAP_PROP_FPS))
     extracted_FPS = input_FPS / interval
     fourCC = cv2.VideoWriter_fourcc(*'MP4V')
-    out = cv2.VideoWriter("/home/pose/Videos/debug.mp4", fourCC, extracted_FPS, (input_width, input_height))
+    out = cv2.VideoWriter("/home/pose/Videos/debug.mp4", fourCC, extracted_FPS, (2 * input_width, input_height))
 
-    # perspective transform
-    pts1 = np.float32([[0, 0], [1920, 0], [0, 1080], [1920, 1080]])
-    pts2 = np.float32([[120, 0], [1800, 0], [0, 1080], [1920, 1080]])
-    M = cv2.getPerspectiveTransform(pts1, pts2)
+    # # perspective transform
+    # pts1 = np.float32([[0, 0], [1920, 0], [0, 1080], [1920, 1080]])
+    # pts2 = np.float32([[120, 0], [1800, 0], [0, 1080], [1920, 1080]])
+    # M = cv2.getPerspectiveTransform(pts1, pts2)
+
+    # read calibration result from file
+    K_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/K.txt")
+    R_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/R.txt")
+    T_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/T.txt")
+    R_matrix, _ = cv2.Rodrigues(R_matrix)
+    R_matrix = np.transpose(R_matrix)
+    # C_matrix = np.matmul(-np.linalg.inv(R_matrix), T_matrix)
+    C_matrix = -np.matmul(R_matrix, T_matrix)
+
 
     fall_down_frame_counter = 0
     fall_down_frame_threshold = extracted_FPS  # falled down for 1 second
     fall_down_list = []
+
+    # # initialize 3D showcase by cococat 2022.3.2
+    # plt.ion()
+    # fig = plt.figure()
+    # ax = fig.gca(projection='3d')
+    # ax.set_xlim(2, 3)
+    # ax.set_ylim(0, 1)
+    # ax.set_zlim(15, 20)
+    # azim = -60
+    # elev = 30
 
     while (cap.isOpened()):
     # if (True):
@@ -220,7 +284,7 @@ if __name__ == "__main__":
         # perspective transform
         # image_bgr = cv2.warpPerspective(image_bgr, M, (1920, 1080))
 
-        # image_bgr = cv2.imread("/home/pose/Pictures/fall.png")
+        # image_bgr = cv2.imread("/home/pose/Pictures/snap_walk.png")
 
         if interval == 0 or counter % interval == 0:
             input = []
@@ -276,7 +340,49 @@ if __name__ == "__main__":
                 adjusted_joints_coord = frame_pose.adjust_joints_2D_coordinate(img_joints, bbox_centers, bbox_scales)
 
                 # draw 2D joints on frame
-                final_image = frame_pose.draw_points_and_skeleton(image_bgr, adjusted_joints_coord, frame_pose.skeleton)
+                # final_image = frame_pose.draw_points_and_skeleton(image_bgr, adjusted_joints_coord, frame_pose.skeleton)
+                img_black = np.zeros((input_height, input_width, 3), np.uint8)      # TODO: temp test 2022.2.28 only skeleton showcase
+                img_black.fill(55)
+                final_image = frame_pose.draw_points_and_skeleton(img_black, adjusted_joints_coord, frame_pose.skeleton)
+                final_image = np.concatenate((image_bgr, final_image), axis=1)
+
+                # project from image coordinate to world coordinate
+                joint_world_coord = []
+                for i in range(adjusted_joints_coord.shape[0]):
+                    for j in range(adjusted_joints_coord[0].shape[0]):
+                        temp_img_joint_coord = np.array([adjusted_joints_coord[i][j][0], adjusted_joints_coord[i][j][1], 1])
+                        temp_cam_joint_coord = transFromImage2Camera(K_matrix, temp_img_joint_coord, C_matrix)
+                        temp_world_joint_coord = transFromCamera2World(R_matrix, C_matrix, temp_cam_joint_coord)
+                        joint_world_coord.append(temp_world_joint_coord)
+                # frame_pose.save_joints_obj("/home/pose/Workspace/Python/Test/WorldJoints.obj", np.array(joint_world_coord))
+                
+                joint_world_coord = np.array(joint_world_coord)
+
+                print(joint_world_coord[8])
+
+                # # real-time draw joints in world coordinate
+                # plt.clf()
+                # fig = plt.gcf()
+                # ax = fig.gca(projection='3d')
+                # ax.view_init(elev, azim)
+                # # x_fig, y_fig, z_fig = joint_world_coord[:-1][0], joint_world_coord[:][1], joint_world_coord[:][2]
+                # x_fig, y_fig, z_fig = [], [], []
+                # for i in range(joint_world_coord.shape[0]):
+                #     x_fig.append(joint_world_coord[i][0])
+                #     y_fig.append(joint_world_coord[i][1])
+                #     z_fig.append(joint_world_coord[i][2])
+
+                # # ax.scatter(x_fig, y_fig, z_fig)
+                # # ax.scatter(joint_world_coord[:, 0], joint_world_coord[:, 1], joint_world_coord[:, 2])
+                # test_joints_np = test_joints.cpu().numpy()
+                # ax.scatter(test_joints_np[0, :, 0], test_joints_np[0, :, 1], test_joints_np[0, :, 2])
+
+                # ax.set_xlabel('X')
+                # ax.set_ylabel('Y')
+                # ax.set_zlabel('Z')
+                # plt.pause(0.001)
+
+                # elev, azim = ax.elev, ax.azim
 
                 # fall-down check:
                 # fall_down_list = frame_pose.fall_down_check(adjusted_joints_coord)
@@ -288,7 +394,10 @@ if __name__ == "__main__":
                 else:
                     fall_down_frame_counter = 0
             else:
-                final_image = image_bgr
+                img_black = np.zeros((input_height, input_width, 3), np.uint8)      # TODO: temp test 2022.2.28 only skeleton showcase
+                img_black.fill(55)
+                final_image = np.concatenate((image_bgr, img_black), axis=1)
+                # final_image = image_bgr
 
             # print bounding box on image
             for box_index, box in enumerate(square_box_list):
@@ -298,11 +407,8 @@ if __name__ == "__main__":
                     color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
                 else:
                     color = (255, 0, 0)
-                plot_box(final_image, box, "xyxy", color)
+                # plot_box(final_image, box, "xyxy", color)     # TODO: 
 
-            # height, width = final_image.shape[:2]
-            # final_resize = cv2.resize(final_image, (2 * width, 2 * height), interpolation=cv2.INTER_CUBIC)
-            # cv2.imshow("img", final_resize)
             cv2.imshow("img", final_image)
             out.write(final_image)
             cv2.waitKey(1)
@@ -310,3 +416,4 @@ if __name__ == "__main__":
 
     cap.release()
     out.release()
+    plt.show()
