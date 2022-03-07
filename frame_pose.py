@@ -292,11 +292,12 @@ def joint_k_check(joint1, joint2):
         else:
             k = abs(delta_y) / delta_x_z_sqrt
     # print("k: ", k)
-    return 1 if k < 1 else 0
+    return 1 if k <= 1 else 0
 
 
-def fall_down_check(img_joints):
+def fall_down_check(img_joints, video_height):
     fall_down_list = []
+    falldown_threshold = video_height - video_height / 3
 
     for batch_index, batch_image_joints in enumerate(img_joints):
         # current_image_joints = []
@@ -307,6 +308,15 @@ def fall_down_check(img_joints):
         #                     joint_coord[1] * bbox_scales[batch_index] + bbox_centers[batch_index][1]])
         #     current_image_joints.append(new_joint)
         # fall_down_list.append(current_image_joints)
+        joint_2D_coord_too_low_check = 0
+        for i in range(15):
+            if(batch_image_joints[i][1] > falldown_threshold):
+                joint_2D_coord_too_low_check += 1
+        # print("joint 2d coord counter : ", joint_2D_coord_too_low_check)
+        if joint_2D_coord_too_low_check > 10:
+            fall_down_list.append(batch_index)
+            continue
+
         neck = batch_image_joints[1]
         pelvis = batch_image_joints[8]
         r_hip = batch_image_joints[9]
@@ -321,7 +331,10 @@ def fall_down_check(img_joints):
         joint_check += joint_k_check(r_knee, r_ankle)   # k_r_crus
         joint_check += joint_k_check(l_hip, l_knee)     # k_l_thigh
         joint_check += joint_k_check(l_knee, l_ankle)   # k_l_curs
-        if(joint_check >= 3):
+        joint_check += joint_k_check(neck, r_ankle)
+        joint_check += joint_k_check(neck, l_ankle)
+
+        if(joint_check >= 4):
             fall_down_list.append(batch_index)
 
     return fall_down_list
