@@ -120,3 +120,4 @@ data/*
 
 # ignore prior.py from smplify-x repo
 smplify/prior.py
+log.txt
