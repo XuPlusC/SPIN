@@ -1,29 +1,18 @@
-from cgi import test
-from curses.ascii import SP
-from ntpath import join
 from turtle import Turtle
-from zipfile import ZipFile
-from matplotlib import projections
-from matplotlib.style import available
-from pyrender import Camera
 import torchvision
 import cv2
 import torch
 import numpy as np
 
-from torchvision.transforms import Normalize
 import argparse
-import json
 from models import hmr, SMPL
-from utils.imutils import crop
 import config
 import constants
-import matplotlib.pyplot as plt    # draw result. by cococat 2021.12.28
-from mpl_toolkits.mplot3d import Axes3D
 import datetime
 import frame_pose
 from paho.mqtt import client as mqtt_client
-import random
+import base64
+import json
 import math
 import requests
 
@@ -192,119 +181,6 @@ def readMatrixFromFile(filepath):
     return ret
 
 
-def pixel2camera(K, uv):
-    """
-    K: 3x3
-    uv: 2
-    """
-    fx = K[0, 0]
-    fy = K[1, 1]
-    cx = K[0, 2]
-    cy = K[1, 2]
-
-    u, v = uv[0], uv[1]
-    X = (u - cx) / fx
-    Y = (v - cy) / fy
-    Z = 1
-    return np.array([X, Y, Z])
-
-
-def camera2world(R, t, p):
-    """
-    R: 3x3
-    t: 3,
-    p: 3,
-    """
-    # matlab 先转置
-    R = R.T
-    # R_inv = np.linalg.inv(R)
-    # return R.dot(p - t)
-    return (p - t).dot(R)
-
-
-def transFromImage2Camera(K_matrix, pt):
-    ret = np.array([
-        (pt[0] - K_matrix[0][2]) * pt[2] / K_matrix[0][0],
-        (pt[1] - K_matrix[1][2]) * pt[2] / K_matrix[1][1],
-        1.0
-    ])
-    return ret
-
-
-def transFromCamera2World(R_matrix, C_matrix, pt):
-    ret = np.array([
-        # R_matrix[0][0] * pt[0] + R_matrix[1][0] * pt[1] + R_matrix[2][0] * pt[2] + C_matrix[0],
-        # R_matrix[0][1] * pt[0] + R_matrix[1][1] * pt[1] + R_matrix[2][1] * pt[2] + C_matrix[1],
-        # R_matrix[0][2] * pt[0] + R_matrix[1][2] * pt[1] + R_matrix[2][2] * pt[2] + C_matrix[2]
-        R_matrix[0][0] * pt[0] + R_matrix[0][1] * pt[1] + R_matrix[0][2] * pt[2] + C_matrix[0],
-        R_matrix[1][0] * pt[0] + R_matrix[1][1] * pt[1] + R_matrix[1][2] * pt[2] + C_matrix[1],
-        R_matrix[2][0] * pt[0] + R_matrix[2][1] * pt[1] + R_matrix[2][2] * pt[2] + C_matrix[2]
-    ])
-    return ret
-
-
-def transFromCamera2World_matlab(R_matrix_transpose, T_matrix, pt):
-    return np.array([
-        (pt[0] - T_matrix[0]) * R_matrix_transpose[0][0] + (pt[1] - T_matrix[1]) * R_matrix_transpose[1][0] + (pt[2] - T_matrix[2]) * R_matrix_transpose[2][0],
-        (pt[0] - T_matrix[0]) * R_matrix_transpose[0][1] + (pt[1] - T_matrix[1]) * R_matrix_transpose[1][1] + (pt[2] - T_matrix[2]) * R_matrix_transpose[2][1],
-        (pt[0] - T_matrix[0]) * R_matrix_transpose[0][2] + (pt[1] - T_matrix[1]) * R_matrix_transpose[1][2] + (pt[2] - T_matrix[2]) * R_matrix_transpose[2][2]
-    ])
-
-
-def transFromImage2World_matlab(K_martix, R_matrix, T_matrix, pt):
-    # K_inv = np.linalg.inv(K_martix)
-    R_T_matrix = np.vstack((R_matrix, T_matrix))
-    Camera_matrix = np.matmul(R_T_matrix, K_martix)
-    Cam_inv_matrix = np.linalg.pinv(Camera_matrix)
-    world_coordinate_homo = np.matmul(pt, Cam_inv_matrix)
-
-    world_coordinate = np.array([
-        world_coordinate_homo[0] / world_coordinate_homo[3],
-        world_coordinate_homo[1] / world_coordinate_homo[3],
-        world_coordinate_homo[2] / world_coordinate_homo[3]
-        ])
-    return world_coordinate
-
-
-# MQTT connection
-# by cococat 2022.3.17
-broker = '192.168.1.100'
-port = 8083
-topic = "marsaii"
-client_id = f'posePC-python-{random.randint(0, 1000)}'
-
-
-def connect_mqtt() -> mqtt_client:
-    def on_connect(client, userdata, flags, rc):
-        if rc == 0:
-            print("Connected to MQTT Broker!")
-        else:
-            print("Failed to connect, return code %d\n", rc)
-
-    def on_message(client, userdata, msg):
-        print(msg.topic+" "+str(msg.payload))
-
-    client = mqtt_client.Client(client_id)
-    client.on_connect = on_connect
-    client.on_message = on_message
-    client.connect(broker, port)
-    return client
-
-
-def subscribe(client: mqtt_client):
-    def on_message(client, userdata, msg):
-        print(f"Received `{msg.payload.decode()}` from `{msg.topic}` topic")
-
-    client.subscribe(topic)
-    client.on_message = on_message
-
-
-def run():
-    client = connect_mqtt()
-    subscribe(client)
-    client.loop_forever()
-
-
 def do_mosaic(frame, x, y, w, h, neighbor=8):
     """
     马赛克的实现原理是把图像上某个像素点一定范围邻域内的所有点用邻域内左上像素点的颜色代替，这样可以模糊细节，但是可以保留大体的轮廓。
@@ -329,10 +205,315 @@ def do_mosaic(frame, x, y, w, h, neighbor=8):
             cv2.rectangle(frame, left_up, right_down, color, -1)
 
 
+class PoseDetect:
+    box_model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+    device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+    model = hmr(config.SMPL_MEAN_PARAMS).to(device)
+    smpl = SMPL(config.SMPL_MODEL_DIR, batch_size=1, create_transl=False).to(device)
+    timeFormat_ISO = "%Y-%m-%d %H:%M:%S"
+    timeFormat_File = "%Y-%m-%d_%H:%M:%S"
+
+    # url_http = "http://juntai.vip3gz.91tunnel.com/pose/free/alarm/pump"
+    # url_http = "http://127.0.0.1:8189/free/alarm/pump"
+    url_http = "http://47.104.74.43:8189/free/alarm/pump"
+    headers = {'Content-Type': 'application/json'}
+
+    def __init__(self, pCheckpoint) -> None:
+        PoseDetect.box_model.cuda()
+        PoseDetect.box_model.eval()
+
+        # SMPL : Load pretrained model
+        checkpoint = torch.load(pCheckpoint)
+        PoseDetect.model.load_state_dict(checkpoint['model'], strict=False)
+        PoseDetect.model.eval()
+
+        # TODO: cap!
+        # input_width, input_height = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        self.fall_down_frame_counter = 0
+        self.fall_down_frame_threshold = 4
+        self.fall_down_list = []
+        self.fall_down_target_counter = 0
+        self.b_send_fall_down_alert = False  # only send alert when new fall down appears. do not keep sending when person has already fallen on the ground
+
+        self.image_showcase = 0
+        self.origin_image = 0
+        self.skeleton_image = 0
+
+        # # skeleton on gray background. by cococat 2022.2.28
+        # img_black = np.zeros((input_height, input_width, 3), np.uint8)
+        # img_black.fill(55)
+
+        # # save human enterance & exit info to file
+        # # by cococat 2022.3.7
+
+        # self.b_person_in_room = False
+
+        # b_available_cap_exsist = True
+
+        # # record human movement and stasis
+        # list_pelvis_queue = [[] for n in range(len(list_cap))]      # list，记录人体中心点的队列
+        # list_b_person_movement_queue = [[] for n in range(len(list_cap))]  # list，记录每个cap中的人是否在当前帧移动的队列
+        # stasis_threshold_x = input_width / 100
+        # stasis_threshold_y = input_height / 125
+
+        # # send fall info via http request
+        # # by cococat 2022.3.21
+        # # url_http = "127.0.0.1:8189/free/alarm/pump"
+
+        print("weee")
+
+    def processFrame(self, image_bgr):
+        input = []
+        img = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        img_tensor = torch.from_numpy(img / 255.0).permute(2, 0, 1).float().cuda()
+        input.append(img_tensor)
+
+        box_list = get_person_detection_boxes(PoseDetect.box_model, input, threshold=0.9)
+        square_box_list = []
+        for box in box_list:
+            (x1, y1), (x2, y2) = box
+            box = [x1, y1, x2, y2]
+
+            box_height = y2 - y1
+            box_width = x2 - x1
+            box_center = np.array([x1 + box_width / 2, y1 + box_height / 2])
+            square_width = max(box_height, box_width)
+            square_width *= 1.05
+            new_upper_left_x = box_center[0] - square_width / 2
+            new_upper_left_y = box_center[1] - square_width / 2
+            new_lower_right_x = box_center[0] + square_width / 2
+            new_lower_right_y = box_center[1] + square_width / 2
+            square_box = [(new_upper_left_x if (new_upper_left_x > 0) else 0, new_upper_left_y if (new_upper_left_y > 0) else 0),
+                            (new_lower_right_x if (new_lower_right_x <= image_bgr.shape[1]) else image_bgr.shape[1], new_lower_right_y if (new_lower_right_y <= image_bgr.shape[0]) else image_bgr.shape[0])]
+            square_box_list.append(square_box)
+
+        # 剔除重合的square_box
+        new_square_box_list = []
+        intersection_rate_thre = 0.9
+        for i in range(0, len(square_box_list)):
+            rect1 = square_box_list[i]
+            coincidence = False
+            for j in range(0, len(square_box_list)):
+                if(i == j):
+                    continue
+
+                rect2 = square_box_list[j]
+                x1 = max(rect1[0][0], rect2[0][0])
+                y1 = max(rect1[0][1], rect2[0][1])
+                x2 = min(rect1[1][0], rect2[1][0])
+                y2 = min(rect1[1][1], rect2[1][1])
+                if (x1 < x2 and y1 < y2):
+                    intersection_area = (x2 - x1) * (y2 - y1)
+                    rect1_area = (rect1[1][0] - rect1[0][0]) * (rect1[1][1] - rect1[0][1])
+                    print('intersection_rate is ', intersection_area / rect1_area)
+                    if(intersection_area / rect1_area > intersection_rate_thre):
+                        print('box coincidence')
+                        coincidence = True
+                        break
+            if not coincidence:
+                new_square_box_list.append(rect1)
+        square_box_list = new_square_box_list
+
+        if len(box_list) != 0:
+            # Preprocess input image and generate predictions
+            norm_img, bbox_centers, bbox_scales = frame_pose.process_image(img, square_box_list, input_res=constants.IMG_RES)
+            with torch.no_grad():
+                pred_rotmat, pred_betas, pred_camera = PoseDetect.model(norm_img.to(PoseDetect.device))
+                pred_output = PoseDetect.smpl(betas=pred_betas, body_pose=pred_rotmat[:, 1:], global_orient=pred_rotmat[:, 0].unsqueeze(1), pose2rot=False)
+                # pred_vertices = pred_output.vertices
+
+            # Calculate camera parameters for rendering
+            camera_translation = torch.stack([pred_camera[:, 1], pred_camera[:, 2], 2*constants.FOCAL_LENGTH/(constants.IMG_RES * pred_camera[:, 0] + 1e-9)], dim=-1)
+
+            # project 3D joints to 2D image
+            # TODO: batch size fix
+            batch_size = 1
+            SPIN_camera_joints = pred_output.joints
+            img_joints = frame_pose.perspective_projection(SPIN_camera_joints,
+                                                rotation=torch.eye(3, device=PoseDetect.device).unsqueeze(0).expand(batch_size, -1, -1),
+                                                translation=camera_translation,
+                                                focal_length=constants.FOCAL_LENGTH,
+                                                camera_center=torch.zeros(batch_size, 2, device=PoseDetect.device))
+
+            # relocate and rescale 2D joints coordinate
+            img_joints = img_joints.cpu().numpy()
+            adjusted_joints_coord = frame_pose.adjust_joints_2D_coordinate(img_joints, bbox_centers, bbox_scales)
+
+            img_black = np.zeros((image_bgr.shape[0], image_bgr.shape[1], 3), np.uint8)
+            img_black.fill(55)
+            final_image = frame_pose.draw_points_and_skeleton(img_black, adjusted_joints_coord, frame_pose.skeleton)
+            # final_image = frame_pose.draw_points_and_skeleton(image_bgr, adjusted_joints_coord, frame_pose.skeleton)
+            self.skeleton_image = final_image
+            self.origin_image = image_bgr
+            final_image = np.concatenate((image_bgr, final_image), axis=1)
+            self.image_showcase = final_image
+
+            # # compare stored pelvis coordinate
+            # current_pelvis = adjusted_joints_coord[0][8]
+            # length_pelvis_queue = len(list_pelvis_queue[index_cap])
+            # if length_pelvis_queue != 0:
+            #     average_stored_pelvis_x = 0
+            #     average_stored_pelvis_y = 0
+            #     # b_temp_movement = false
+            #     for index_stored_pelvis in range(length_pelvis_queue):
+            #         average_stored_pelvis_x += list_pelvis_queue[index_cap][index_stored_pelvis][0]
+            #         average_stored_pelvis_y += list_pelvis_queue[index_cap][index_stored_pelvis][1]
+            #     average_stored_pelvis_x /= length_pelvis_queue
+            #     average_stored_pelvis_y /= length_pelvis_queue
+            #     if abs(current_pelvis[0] - average_stored_pelvis_x) < stasis_threshold_x and abs(current_pelvis[1] - average_stored_pelvis_y) < stasis_threshold_y:
+            #         list_b_person_movement_queue[index_cap].append(False)
+            #         # print("room ", str(index_cap), " static!")
+            #     else:
+            #         list_b_person_movement_queue[index_cap].append(True)
+            #         # print("room ", str(index_cap), " moving!")
+
+            #     # b_movement = False
+            #     # for index_stored_pelvis in range(length_pelvis_queue):
+            #     #     stored_frame_pelvis_x = list_pelvis_queue[index_cap][index_stored_pelvis][0]
+            #     #     stored_frame_pelvis_y = list_pelvis_queue[index_cap][index_stored_pelvis][1]
+            #     #     if abs(current_pelvis[0] - stored_frame_pelvis_x) > stasis_threshold_x and abs(current_pelvis[1] - stored_frame_pelvis_y) > stasis_threshold_y:
+            #     #         b_movement = True
+            #     #         break
+            #     # if b_movement:
+            #     #     list_b_person_movement_queue[index_cap].append(True)
+            #     # else:
+            #     #     list_b_person_movement_queue[index_cap].append(False)
+
+            # else:
+            #     list_b_person_movement_queue[index_cap].append(True)
+
+            # if length_pelvis_queue == 5:
+            #     list_pelvis_queue[index_cap].pop(0)
+            # list_pelvis_queue[index_cap].append(current_pelvis)
+            # if len(list_b_person_movement_queue[index_cap]) >= 8:
+            #     list_b_person_movement_queue[index_cap].pop(0)
+
+            # fall-down check:
+            fall_down_list = frame_pose.fall_down_check(adjusted_joints_coord, image_bgr.shape[0])
+            fallen_count = len(fall_down_list)
+            if(fallen_count > 0):
+                self.fall_down_frame_counter += 1
+                if(fallen_count > self.fall_down_target_counter and self.fall_down_frame_counter > self.fall_down_frame_threshold):
+                    self.fall_down_target_counter = fallen_count
+                    self.b_send_fall_down_alert = True
+                    # print("need to alert")
+                else:
+                    self.b_send_fall_down_alert = False
+                # print("fall!")
+            else:
+                self.fall_down_frame_counter = 0
+                self.b_send_fall_down_alert = False
+                self.fall_down_target_counter = 0
+
+            # if list_b_person_in_room[index_cap] is False:
+            #     list_b_person_in_room[index_cap] = True
+            #     str_log = datetime.datetime.now().strftime(timeFormat_ISO) + ": enter room " + str(index_cap) + " \n"
+            #     print(str_log)
+            #     with open('log.txt', 'a') as file_log_entrance_and_exit:
+            #         file_log_entrance_and_exit.write(str_log)
+
+        else:   # no person found in the frame
+            pass
+            # final_image = np.concatenate((image_bgr, img_black.copy()), axis=1)
+            # # final_image = image_bgr
+
+            # if list_b_person_in_room[index_cap] is True:
+            #     list_b_person_in_room[index_cap] = False
+            #     str_log = datetime.datetime.now().strftime(timeFormat_ISO) + ": leave room " + str(index_cap) + " \n"
+            #     print(str_log)
+            #     with open('log.txt', 'a') as file_log_entrance_and_exit:
+            #         file_log_entrance_and_exit.write(str_log)
+
+            # # clear the record queue
+            # if(len(list_pelvis_queue[index_cap]) != 0):
+            #     list_pelvis_queue[index_cap].clear()
+            # if(len(list_b_person_movement_queue[index_cap]) != 0):
+            #     print("clear person movement queue")
+            #     list_b_person_movement_queue[index_cap].clear()
+
+        # decide whether the person has fallen down or not
+        # print bounding box on image
+        for box_index, box in enumerate(square_box_list):
+            (x1, y1), (x2, y2) = box
+            box = [x1, y1, x2, y2]
+            if self.fall_down_frame_counter > self.fall_down_frame_threshold and self.b_send_fall_down_alert is True:
+                # # save file to local server approach
+                # # temporarily disabled 2022.3.29
+                # str_dateTimeFile = datetime.datetime.now().strftime(PoseDetect.timeFormat_File)
+                # str_originImageFilePath = "/home/juntai/docker_apps/nginx/volumes/html/pose_images/origin/" + str_dateTimeFile + ".jpg"
+                # str_skeletonImageFilePath = "/home/juntai/docker_apps/nginx/volumes/html/pose_images/pose/" + str_dateTimeFile + ".jpg"
+                # cv2.imwrite(str_originImageFilePath, self.origin_image)
+                # cv2.imwrite(str_skeletonImageFilePath, self.skeleton_image)
+
+                # # send fall down alert to aliyun server
+                # payload = {
+                #     "id": "dong2CameraId1",
+                #     "cameraImageUrl": str_dateTimeFile + ".jpg",
+                #     "poseImageUrl": str_dateTimeFile + ".jpg",
+                #     "type": 1,
+                #     "alarmTime": datetime.datetime.now().strftime(PoseDetect.timeFormat_ISO)
+                # }
+                # r = requests.post(PoseDetect.url_http, headers=PoseDetect.headers, data=json.dumps(payload))
+                # print(r.status_code)
+                # print(r.content)
+
+                # save file to aliyun server approach
+                # by cococat 2022.3.29
+                # str_dateTimeFile = datetime.datetime.now().strftime(PoseDetect.timeFormat_File)
+                # str_originImageFilePath = "/home/juntai/docker_apps/nginx/volumes/html/pose_images/origin/" + str_dateTimeFile + ".jpg"
+                # str_skeletonImageFilePath = "/home/juntai/docker_apps/nginx/volumes/html/pose_images/pose/" + str_dateTimeFile + ".jpg"
+                # cv2.imwrite(str_originImageFilePath, self.origin_image)
+                # cv2.imwrite(str_skeletonImageFilePath, self.skeleton_image)
+
+                encoded_origin_image = cv2.imencode('.jpg', self.origin_image)[1]
+                encoded_skeleton_image = cv2.imencode('.jpg', self.skeleton_image)[1]
+                # strdata_origin_image = np.array(encoded_origin_image).tostring()
+                # strdata_skeleton_image = np.array(encoded_skeleton_image).tostring()
+                strdata_origin_image = str(base64.b64encode(encoded_origin_image))[2:-1]
+                strdata_skeleton_image = str(base64.b64encode(encoded_skeleton_image))[2:-1]
+
+
+                # send fall down alert to server
+                payload = {
+                    "id": "Xi6CameraId1",
+                    "cameraImageUrl": strdata_origin_image,
+                    "poseImageUrl": strdata_skeleton_image,
+                    "type": 1,
+                    "alarmTime": datetime.datetime.now().strftime(PoseDetect.timeFormat_ISO)
+                }
+                # print(payload)
+                r = requests.post(PoseDetect.url_http, headers=PoseDetect.headers, data=json.dumps(payload))
+                print(r.status_code)
+                print(r.content)
+
+
+                color = (255, 0, 0) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
+                # color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
+            else:
+                color = (255, 0, 0)
+            plot_box(self.image_showcase, box, "xyxy", color)
+
+        # # print moving or static on image
+        # if b_person_in_room is False:
+        #     cv2.putText(final_image, "nobody", (200, 200), cv2.FONT_HERSHEY_COMPLEX, 2.0, (100, 100, 255), 5)
+        # else:
+        #     move_frame_count = 0
+        #     for index_list_b_move in range(len(list_b_person_movement_queue[index_cap])):
+        #         if list_b_person_movement_queue[index_cap][index_list_b_move] is True:
+        #             move_frame_count += 1
+
+        #     if move_frame_count >= len(list_b_person_movement_queue[index_cap]) * 0.6:
+        #         cv2.putText(final_image, "moving", (200, 200), cv2.FONT_HERSHEY_COMPLEX, 2.0, (100, 100, 255), 5)
+        #     else:
+        #         cv2.putText(final_image, "static", (200, 200), cv2.FONT_HERSHEY_COMPLEX, 2.0, (100, 100, 255), 5)
+
+        cv2.imshow("cam1", self.image_showcase)
+        cv2.waitKey(1)
+
+
 if __name__ == "__main__":
     args = parser.parse_args()
-
-    # run()
 
     box_model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
     box_model.cuda()
@@ -370,7 +551,8 @@ if __name__ == "__main__":
     # cap = cv2.VideoCapture("/home/pose/Videos/3_12_static/new67.mp4")
     # cap = cv2.VideoCapture("rtsp://192.168.1.201:8554/ds-test")
     # cap = cv2.VideoCapture("http://192.168.1.201:8080/proxy/0.flv")
-    cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/video")
+    # cap = cv2.VideoCapture("/home/pose/Videos/horizon.mp4")
+    cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/64")
 
     list_cap = [cap]
 
@@ -386,33 +568,10 @@ if __name__ == "__main__":
     fourCC = cv2.VideoWriter_fourcc(*'MP4V')
     # out = cv2.VideoWriter("/home/pose/Videos/debug.mp4", fourCC, extracted_FPS, (2000, 500))
 
-    # read calibration result from file
-    K_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/K.txt")
-    R_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/R.txt")
-    T_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/T.txt")
-
-    # R_matrix_inv = np.linalg.inv(R_matrix)
-    R_matrix_transpose = np.transpose(R_matrix)
-    # R_matrix, _  = cv2.Rodrigues(R_matrix)
-    # R_matrix = np.transpose(R_matrix)
-    # C_matrix = np.matmul(-np.linalg.inv(R_matrix), T_matrix)
-    # C_matrix = -np.matmul(R_matrix, T_matrix)
-    # C_matrix = -np.matmul(np.transpose(R_matrix), T_matrix)
-
     fall_down_frame_counter = 0
     fall_down_frame_threshold = extracted_FPS / 2  # falled down for 0.5 second
     fall_down_list = []
     list_fall_down_frame_counter = [0 for n in range(len(list_cap))]
-
-    # # initialize 3D showcase by cococat 2022.3.2
-    # plt.ion()
-    # fig = plt.figure()
-    # ax = fig.gca(projection='3d')
-    # # ax.set_xlim(2, 3)
-    # # ax.set_ylim(0, 1)
-    # # ax.set_zlim(15, 20)
-    # azim = -60
-    # elev = 30
 
     # skeleton on gray background. by cococat 2022.2.28
     img_black = np.zeros((input_height, input_width, 3), np.uint8)
@@ -430,6 +589,12 @@ if __name__ == "__main__":
     list_b_person_movement_queue = [[] for n in range(len(list_cap))]  # list，记录每个cap中的人是否在当前帧移动的队列
     stasis_threshold_x = input_width / 100
     stasis_threshold_y = input_height / 125
+
+    # send fall info via http request
+    # by cococat 2022.3.21
+    # url_http = "127.0.0.1:8189/free/alarm/pump"
+    url_http = "http://127.0.0.1:8189/pose/free/alarm/pump"
+    headers = {'Content-Type': 'application/json'}
 
     while (b_available_cap_exsist):
         b_available_cap_exsist = False
@@ -499,8 +664,8 @@ if __name__ == "__main__":
                         # final_image = frame_pose.draw_points_and_skeleton(image_bgr, adjusted_joints_coord, frame_pose.skeleton)
 
                         final_image = frame_pose.draw_points_and_skeleton(img_black.copy(), adjusted_joints_coord, frame_pose.skeleton)
-                        cv2.imwrite("/home/pose/Pictures/skeleton.jpg", final_image)
-                        cv2.imwrite("/home/pose/Pictures/origin.jpg", image_bgr)
+                        cv2.imwrite("/home/pose/Workspace/Python/Test/FallImage/Pose/test.jpg", final_image)
+                        cv2.imwrite("/home/pose/Workspace/Python/Test/FallImage/Cam/test.jpg", image_bgr)
                         final_image = np.concatenate((image_bgr, final_image), axis=1)
 
                         # compare stored pelvis coordinate
@@ -533,7 +698,7 @@ if __name__ == "__main__":
                             #     list_b_person_movement_queue[index_cap].append(True)
                             # else:
                             #     list_b_person_movement_queue[index_cap].append(False)
-                             
+
                         else:
                             list_b_person_movement_queue[index_cap].append(True)
 
@@ -542,64 +707,6 @@ if __name__ == "__main__":
                         list_pelvis_queue[index_cap].append(current_pelvis)
                         if len(list_b_person_movement_queue[index_cap]) >= 8:
                             list_b_person_movement_queue[index_cap].pop(0)
-
-                        # # project from image coordinate to world coordinate
-                        # SPIN_camera_joints = SPIN_camera_joints.cpu().numpy()
-                        # SPIN_camera_joints_XZY = []
-                        # for iter in range(SPIN_camera_joints.shape[0]):
-                        #     temp_joints = SPIN_camera_joints[iter]
-                        #     SPIN_camera_joints_XZY.append(temp_joints[:, [0, 2, 1]])
-
-                        # # frame_pose.save_joints_obj("/home/pose/Workspace/Python/Test/Joint_SPIN.obj", SPIN_camera_joints_XZY[0])
-                        # list_all_joint_world_coord = []
-                        # for k in range(adjusted_joints_coord.shape[0]):
-                        #     list_current_person_joint = []
-                        #     for j in range(adjusted_joints_coord[0].shape[0]):
-                        #         temp_img_joint_coord = np.array([adjusted_joints_coord[k][j][0], adjusted_joints_coord[k][j][1], 1])
-                        #         # temp_cam_joint_coord = transFromImage2Camera(K_matrix, temp_img_joint_coord)
-                        #         # # temp_world_joint_coord = transFromCamera2World(R_matrix, C_matrix, temp_cam_joint_coord)
-                        #         # temp_world_joint_coord = transFromCamera2World_matlab(R_matrix_transpose, T_matrix, temp_cam_joint_coord)
-                        #         # # temp_world_joint_coord = transFromImage2World_matlab(K_matrix, R_matrix, T_matrix, temp_img_joint_coord)
-
-
-                        #         # temp_cam_joint_coord = pixel2camera(K_matrix, temp_img_joint_coord)
-                        #         # temp_world_joint_coord = camera2world(R_matrix, T_matrix, temp_cam_joint_coord)
-
-
-                        #         # SPIN_joint_XZY = np.array([SPIN_camera_joints[k][j][0], SPIN_camera_joints[k][j][2], SPIN_camera_joints[k][j][1]])
-                        #         # temp_world_joint_coord = camera2world(R_matrix, np.array([0,0,0]), SPIN_joint_XZY)
-                        #         temp_world_joint_coord = camera2world(R_matrix, np.array([0,0,0]), SPIN_camera_joints[k][j])
-
-                        #         # temp_world_joint_coord = camera2world(R_matrix, np.array([0, 0, 0]), SPIN_camera_joints_XZY[k][j])
-
-                        #         list_current_person_joint.append(temp_world_joint_coord)
-                        #     list_all_joint_world_coord.append(list_current_person_joint)
-                        
-                        # list_all_joint_world_coord = np.array(list_all_joint_world_coord)
-                        # frame_pose.save_joints_obj("/home/pose/Workspace/Python/Test/Joint_Rotated.obj", list_all_joint_world_coord[0])
-
-                        # print(list_all_joint_world_coord[0, 8])
-
-                        # # real-time draw joints in world coordinate
-                        # plt.clf()
-                        # fig = plt.gcf()
-                        # ax = fig.gca(projection='3d')
-                        # ax.view_init(elev, azim)
-
-                        # ax.scatter(list_all_joint_world_coord[0, :, 0], list_all_joint_world_coord[0, :, 1], list_all_joint_world_coord[0, :, 2])
-                        # # test_joints_np = SPIN_camera_joints.cpu().numpy()
-                        # # ax.scatter(test_joints_np[0, :, 0], test_joints_np[0, :, 1], test_joints_np[0, :, 2])
-
-                        # ax.set_xlabel('X')
-                        # ax.set_ylabel('Y')
-                        # ax.set_zlabel('Z')
-                        # # plt.axis("equal")
-                        # # plt.xticks(np.linspace(0, 0.1, 2))
-                        # # plt.yticks(np.linspace(0, 0.1, 2))
-                        # # plt.zticks(np.linspace(0, 0.1, 2))
-                        # plt.pause(0.001)
-
-                        # elev, azim = ax.elev, ax.azim
 
                         # fall-down check:
                         fall_down_list = frame_pose.fall_down_check(adjusted_joints_coord, input_height)
@@ -640,17 +747,32 @@ if __name__ == "__main__":
                         if(len(list_b_person_movement_queue[index_cap]) != 0):
                             print("clear person movement queue")
                             list_b_person_movement_queue[index_cap].clear()
+
+                    # decide whether the person has fallen down or not
                     # print bounding box on image
                     for box_index, box in enumerate(square_box_list):
                         (x1, y1), (x2, y2) = box
                         box = [x1, y1, x2, y2]
                         if list_fall_down_frame_counter[index_cap] > fall_down_frame_threshold:
+                            print(datetime.datetime.now().strftime(ISOTIMEFORMAT))
+                            # send fall down alert to server
+                            payload = {
+                                "id": "testCameraId3",
+                                "cameraImageUrl": "/home/pose/Workspace/Python/Test/FallImage/Cam/test.jpg",
+                                "poseImageUrl": "/home/pose/Workspace/Python/Test/FallImage/Pose/test.jpg",
+                                "type": 1,
+                                "alarmTime": datetime.datetime.now().strftime(ISOTIMEFORMAT)
+                            }
+                            r = requests.post(url_http, headers=headers, data=json.dumps(payload))
+                            print(r.status_code)
+                            print(r.content)
+
                             color = (255, 0, 0) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
                             # color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
                         else:
                             color = (255, 0, 0)
                         plot_box(final_image, box, "xyxy", color)
-                    
+
                     # print moving or static on image
                     if list_b_person_in_room[index_cap] is False:
                         cv2.putText(final_image, "nobody", (200, 200), cv2.FONT_HERSHEY_COMPLEX, 2.0, (100, 100, 255), 5)
@@ -677,7 +799,7 @@ if __name__ == "__main__":
             cv2.imshow("img", image_concatenate)
             # out.write(image_concatenate)
             cv2.waitKey(1)
-        
+
         # reset the frame counter
         if counter % interval == 24:
             counter = 0

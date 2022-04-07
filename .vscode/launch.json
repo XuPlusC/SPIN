@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "args": [
                 "--checkpoint=data/model_checkpoint.pt", 
-                "--img=examples/im1010.jpg"
+                // "--img=examples/im1010.jpg"
                 // "--img=XJXTest/bean.png"
                 // "--img=XJXTest/batch0.png"
             ]
