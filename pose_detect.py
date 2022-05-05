@@ -795,7 +795,7 @@ if __name__ == "__main__":
                     image_concatenate = list_final_image[0]
                 else:
                     image_concatenate = np.concatenate((image_concatenate, list_final_image[i]), axis=0)
-            # image_concatenate = cv2.resize(image_concatenate, (2000, 500 * len(list_final_image)))
+            image_concatenate = cv2.resize(image_concatenate, (2000, 500 * len(list_final_image)))
             cv2.imshow("img", image_concatenate)
             # out.write(image_concatenate)
             cv2.waitKey(1)

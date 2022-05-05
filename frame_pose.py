@@ -308,34 +308,80 @@ def fall_down_check(img_joints, video_height):
         #                     joint_coord[1] * bbox_scales[batch_index] + bbox_centers[batch_index][1]])
         #     current_image_joints.append(new_joint)
         # fall_down_list.append(current_image_joints)
-        joint_2D_coord_too_low_check = 0
-        for i in range(15):
-            if(batch_image_joints[i][1] > falldown_threshold):
-                joint_2D_coord_too_low_check += 1
-        # print("joint 2d coord counter : ", joint_2D_coord_too_low_check)
-        if joint_2D_coord_too_low_check > 10:
+
+        # joint_2D_coord_too_low_check = 0
+        # for i in range(15):
+        #     if(batch_image_joints[i][1] > falldown_threshold):
+        #         joint_2D_coord_too_low_check += 1
+        # # print("joint 2d coord counter : ", joint_2D_coord_too_low_check)
+        # if joint_2D_coord_too_low_check > 10:
+        #     fall_down_list.append(batch_index)
+        #     continue
+
+        # get the left/right top/bottom border
+        left_border = batch_image_joints[0][0]
+        right_border = batch_image_joints[0][0]
+        top_border = batch_image_joints[0][1]
+        bottom_border = batch_image_joints[0][1]
+
+        left_knee_y = batch_image_joints[13][1]
+        right_knee_y = batch_image_joints[10][1]
+        head_y = (batch_image_joints[17][1] + batch_image_joints[18][1]) / 2
+
+        for i in range(18):
+            left_border = min(left_border, batch_image_joints[i + 1][0])
+            right_border = max(right_border, batch_image_joints[i + 1][0])
+            top_border = max(top_border, batch_image_joints[i + 1][1])
+            bottom_border = min(bottom_border, batch_image_joints[i + 1][1])
+
+        avg_shoulder_y = (batch_image_joints[2][1] + batch_image_joints[5][1]) / 2
+        avg_hip_y = (batch_image_joints[9][1] + batch_image_joints[12][1]) / 2
+        delta_y_shoulder2leftHip = abs(head_y - batch_image_joints[12][1])
+        delta_y_shoulder2rightHip = abs(head_y - batch_image_joints[9][1])
+        human_height = top_border - bottom_border
+        human_width = right_border - left_border
+        if(human_width >= 2 * human_height):
             fall_down_list.append(batch_index)
             continue
 
-        neck = batch_image_joints[1]
-        pelvis = batch_image_joints[8]
-        r_hip = batch_image_joints[9]
-        r_knee = batch_image_joints[10]
-        r_ankle = batch_image_joints[11]
-        l_hip = batch_image_joints[12]
-        l_knee = batch_image_joints[13]
-        l_ankle = batch_image_joints[14]
-        joint_check = 0
-        joint_check += joint_k_check(neck, pelvis)      # k_spine
-        joint_check += joint_k_check(r_hip, r_knee)     # k_r_thigh
-        joint_check += joint_k_check(r_knee, r_ankle)   # k_r_crus
-        joint_check += joint_k_check(l_hip, l_knee)     # k_l_thigh
-        joint_check += joint_k_check(l_knee, l_ankle)   # k_l_curs
-        joint_check += joint_k_check(neck, r_ankle)
-        joint_check += joint_k_check(neck, l_ankle)
-
-        if(joint_check >= 4):
+        # delta_y_shoulder2hip = abs(avg_hip_y - avg_shoulder_y)
+        # if(delta_y_shoulder2hip >= 0.8 * human_height or delta_y_shoulder2hip <= 0.2 * human_height):
+        #     fall_down_list.append(batch_index)
+        #     continue
+        if(delta_y_shoulder2leftHip >= 0.8 * human_height or delta_y_shoulder2leftHip <= 0.2 * human_height):
             fall_down_list.append(batch_index)
+            continue
+        if(delta_y_shoulder2rightHip >= 0.8 * human_height or delta_y_shoulder2rightHip <= 0.2 * human_height):
+            fall_down_list.append(batch_index)
+            continue
+
+        delta_y_nose2leftKnee = abs(head_y - left_knee_y)
+        delta_y_nose2rightKnee = abs(head_y - right_knee_y)
+        if(delta_y_nose2leftKnee >= 0.8 * human_height or delta_y_nose2leftKnee <= 0.2 * human_height):
+            fall_down_list.append(batch_index)
+            continue
+        if(delta_y_nose2rightKnee >= 0.8 * human_height or delta_y_nose2rightKnee <= 0.2 * human_height):
+            fall_down_list.append(batch_index)
+            continue
+        # neck = batch_image_joints[1]
+        # pelvis = batch_image_joints[8]
+        # r_hip = batch_image_joints[9]
+        # r_knee = batch_image_joints[10]
+        # r_ankle = batch_image_joints[11]
+        # l_hip = batch_image_joints[12]
+        # l_knee = batch_image_joints[13]
+        # l_ankle = batch_image_joints[14]
+        # joint_check = 0
+        # joint_check += joint_k_check(neck, pelvis)      # k_spine
+        # joint_check += joint_k_check(r_hip, r_knee)     # k_r_thigh
+        # joint_check += joint_k_check(r_knee, r_ankle)   # k_r_crus
+        # joint_check += joint_k_check(l_hip, l_knee)     # k_l_thigh
+        # joint_check += joint_k_check(l_knee, l_ankle)   # k_l_curs
+        # joint_check += joint_k_check(neck, r_ankle)
+        # joint_check += joint_k_check(neck, l_ankle)
+
+        # if(joint_check >= 4):
+        #     fall_down_list.append(batch_index)
 
     return fall_down_list
 

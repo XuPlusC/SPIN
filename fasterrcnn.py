@@ -370,7 +370,8 @@ if __name__ == "__main__":
     # cap = cv2.VideoCapture("/home/pose/Videos/3_12_static/new67.mp4")
     # cap = cv2.VideoCapture("rtsp://192.168.1.201:8554/ds-test")
     # cap = cv2.VideoCapture("http://192.168.1.201:8080/proxy/0.flv")
-    cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/video")
+    # cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/video")
+    cap = cv2.VideoCapture("/home/pose/Videos/high.mp4")
 
     list_cap = [cap]
 
@@ -645,8 +646,8 @@ if __name__ == "__main__":
                         (x1, y1), (x2, y2) = box
                         box = [x1, y1, x2, y2]
                         if list_fall_down_frame_counter[index_cap] > fall_down_frame_threshold:
-                            color = (255, 0, 0) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
-                            # color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
+                            # color = (255, 0, 0) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
+                            color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
                         else:
                             color = (255, 0, 0)
                         plot_box(final_image, box, "xyxy", color)
