@@ -371,7 +371,7 @@ if __name__ == "__main__":
     # cap = cv2.VideoCapture("rtsp://192.168.1.201:8554/ds-test")
     # cap = cv2.VideoCapture("http://192.168.1.201:8080/proxy/0.flv")
     # cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/video")
-    cap = cv2.VideoCapture("/home/pose/Videos/high.mp4")
+    cap = cv2.VideoCapture("/home/pose/Videos/lookdown.mp4")
 
     list_cap = [cap]
 

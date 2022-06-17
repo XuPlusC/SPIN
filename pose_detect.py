@@ -215,7 +215,8 @@ class PoseDetect:
 
     # url_http = "http://juntai.vip3gz.91tunnel.com/pose/free/alarm/pump"
     # url_http = "http://127.0.0.1:8189/free/alarm/pump"
-    url_http = "http://47.104.74.43:8189/free/alarm/pump"
+    # url_http = "http://47.104.74.43:8189/free/alarm/pump"
+    url_http = "http://47.97.116.47:8004/free/alarm/pump"
     headers = {'Content-Type': 'application/json'}
 
     def __init__(self, pCheckpoint) -> None:
@@ -306,9 +307,9 @@ class PoseDetect:
                 if (x1 < x2 and y1 < y2):
                     intersection_area = (x2 - x1) * (y2 - y1)
                     rect1_area = (rect1[1][0] - rect1[0][0]) * (rect1[1][1] - rect1[0][1])
-                    print('intersection_rate is ', intersection_area / rect1_area)
+                    # print('intersection_rate is ', intersection_area / rect1_area)
                     if(intersection_area / rect1_area > intersection_rate_thre):
-                        print('box coincidence')
+                        # print('box coincidence')
                         coincidence = True
                         break
             if not coincidence:
@@ -391,6 +392,7 @@ class PoseDetect:
 
             # fall-down check:
             fall_down_list = frame_pose.fall_down_check(adjusted_joints_coord, image_bgr.shape[0])
+            # fall_down_list = frame_pose.bow_down_check(adjusted_joints_coord, image_bgr.shape[0])
             fallen_count = len(fall_down_list)
             if(fallen_count > 0):
                 self.fall_down_frame_counter += 1
@@ -437,7 +439,7 @@ class PoseDetect:
         for box_index, box in enumerate(square_box_list):
             (x1, y1), (x2, y2) = box
             box = [x1, y1, x2, y2]
-            if self.fall_down_frame_counter > self.fall_down_frame_threshold and self.b_send_fall_down_alert is True:
+            if self.fall_down_frame_counter > self.fall_down_frame_threshold :
                 # # save file to local server approach
                 # # temporarily disabled 2022.3.29
                 # str_dateTimeFile = datetime.datetime.now().strftime(PoseDetect.timeFormat_File)
@@ -466,30 +468,29 @@ class PoseDetect:
                 # cv2.imwrite(str_originImageFilePath, self.origin_image)
                 # cv2.imwrite(str_skeletonImageFilePath, self.skeleton_image)
 
-                encoded_origin_image = cv2.imencode('.jpg', self.origin_image)[1]
-                encoded_skeleton_image = cv2.imencode('.jpg', self.skeleton_image)[1]
-                # strdata_origin_image = np.array(encoded_origin_image).tostring()
-                # strdata_skeleton_image = np.array(encoded_skeleton_image).tostring()
-                strdata_origin_image = str(base64.b64encode(encoded_origin_image))[2:-1]
-                strdata_skeleton_image = str(base64.b64encode(encoded_skeleton_image))[2:-1]
+                if self.b_send_fall_down_alert is True:
+                    encoded_origin_image = cv2.imencode('.jpg', self.origin_image)[1]
+                    encoded_skeleton_image = cv2.imencode('.jpg', self.skeleton_image)[1]
+                    # strdata_origin_image = np.array(encoded_origin_image).tostring()
+                    # strdata_skeleton_image = np.array(encoded_skeleton_image).tostring()
+                    strdata_origin_image = str(base64.b64encode(encoded_origin_image))[2:-1]
+                    strdata_skeleton_image = str(base64.b64encode(encoded_skeleton_image))[2:-1]
 
+                    # send fall down alert to server
+                    payload = {
+                        "id": "Xi6CameraId1",
+                        "cameraImageUrl": strdata_origin_image,
+                        "poseImageUrl": strdata_skeleton_image,
+                        "type": 1,
+                        "alarmTime": datetime.datetime.now().strftime(PoseDetect.timeFormat_ISO)
+                    }
+                    # print(payload)
+                    r = requests.post(PoseDetect.url_http, headers=PoseDetect.headers, data=json.dumps(payload))
+                    print(r.status_code)
+                    print(r.content)
 
-                # send fall down alert to server
-                payload = {
-                    "id": "Xi6CameraId1",
-                    "cameraImageUrl": strdata_origin_image,
-                    "poseImageUrl": strdata_skeleton_image,
-                    "type": 1,
-                    "alarmTime": datetime.datetime.now().strftime(PoseDetect.timeFormat_ISO)
-                }
-                # print(payload)
-                r = requests.post(PoseDetect.url_http, headers=PoseDetect.headers, data=json.dumps(payload))
-                print(r.status_code)
-                print(r.content)
-
-
-                color = (255, 0, 0) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
-                # color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
+                # color = (255, 0, 0) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
+                color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
             else:
                 color = (255, 0, 0)
             plot_box(self.image_showcase, box, "xyxy", color)

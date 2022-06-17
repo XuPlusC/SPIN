@@ -86,6 +86,7 @@ class MQTTClient(mqtt_client.Client):
         # print(str(msg.payload, 'utf-8'))
 
         # matchRes = re.findall('\"image\":\"(.*)\",\"ppi\"', str(msg.payload, 'utf-8'))
+        # matchRes = re.findall(b'\"image\":\"(.*)\",\"label\"', msg.payload)
         matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
 
         if len(matchRes) != 0:
@@ -102,6 +103,8 @@ class MQTTClient(mqtt_client.Client):
             imageData_bytes = base64.b64decode(strNoNewLine)
             imageData_nparr = np.fromstring(imageData_bytes, np.uint8)
             image = cv2.imdecode(imageData_nparr, -1)
+            # cv2.imshow("wee", image)
+            # cv2.waitKey(1)
             client.poseDetector.processFrame(image)
 
 
@@ -126,7 +129,7 @@ if __name__ == "__main__":
     client.on_connect = MQTTClient.on_connect    # 连接broker时broker响应的回调
     client.on_message = MQTTClient.on_message    # 接收到订阅消息时的回调
 
-    client.connect("192.168.1.100", 1883, 60)    # 连接到broker
+    client.connect("192.168.1.2", 1883, 60)    # 连接到broker
 
     # Blocking call that processes network traffic, dispatches callbacks and
     # handles reconnecting.
