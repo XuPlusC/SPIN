@@ -215,7 +215,8 @@ class PoseDetect:
 
     # url_http = "http://juntai.vip3gz.91tunnel.com/pose/free/alarm/pump"
     # url_http = "http://127.0.0.1:8189/free/alarm/pump"
-    url_http = "http://47.104.74.43:8189/free/alarm/pump"
+    # url_http = "http://47.104.74.43:8189/free/alarm/pump"
+    url_http = "http://47.97.116.47:8004/free/alarm/pump"
     headers = {'Content-Type': 'application/json'}
 
     def __init__(self, pCheckpoint) -> None:
@@ -664,8 +665,8 @@ if __name__ == "__main__":
                         # final_image = frame_pose.draw_points_and_skeleton(image_bgr, adjusted_joints_coord, frame_pose.skeleton)
 
                         final_image = frame_pose.draw_points_and_skeleton(img_black.copy(), adjusted_joints_coord, frame_pose.skeleton)
-                        cv2.imwrite("/home/pose/Workspace/Python/Test/FallImage/Pose/test.jpg", final_image)
-                        cv2.imwrite("/home/pose/Workspace/Python/Test/FallImage/Cam/test.jpg", image_bgr)
+                        # cv2.imwrite("/home/pose/Workspace/Python/Test/FallImage/Pose/test.jpg", final_image)
+                        # cv2.imwrite("/home/pose/Workspace/Python/Test/FallImage/Cam/test.jpg", image_bgr)
                         final_image = np.concatenate((image_bgr, final_image), axis=1)
 
                         # compare stored pelvis coordinate
@@ -723,12 +724,12 @@ if __name__ == "__main__":
                             with open('log.txt', 'a') as file_log_entrance_and_exit:
                                 file_log_entrance_and_exit.write(str_log)
 
-                        # temp mosaic 2022.3.17
-                        for batch_index, batch_image_joints in enumerate(adjusted_joints_coord):
-                            joint_nose = batch_image_joints[0]
-                            joint_neck = batch_image_joints[1]
-                            dist = math.sqrt(pow(joint_neck[0] - joint_nose[0], 2) + pow(joint_neck[1] - joint_nose[1], 2))
-                            do_mosaic(final_image, int(joint_nose[0] - dist), int(joint_nose[1] - dist), int(2 * dist), int(2 * dist))
+                        # # temp mosaic 2022.3.17
+                        # for batch_index, batch_image_joints in enumerate(adjusted_joints_coord):
+                        #     joint_nose = batch_image_joints[0]
+                        #     joint_neck = batch_image_joints[1]
+                        #     dist = math.sqrt(pow(joint_neck[0] - joint_nose[0], 2) + pow(joint_neck[1] - joint_nose[1], 2))
+                        #     do_mosaic(final_image, int(joint_nose[0] - dist), int(joint_nose[1] - dist), int(2 * dist), int(2 * dist))
 
                     else:   # no person found in the frame
                         final_image = np.concatenate((image_bgr, img_black.copy()), axis=1)

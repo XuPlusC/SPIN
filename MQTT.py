@@ -24,8 +24,8 @@ def on_connect(client, userdata, flags, rc):
 
 
 def on_message(client, userdata, msg, poseDetector):
-    # print(msg.topic+" "+str(msg.payload))
-    # print(str(msg.payload, 'utf-8'))
+    print(msg.topic+" "+str(msg.payload))
+    print(str(msg.payload, 'utf-8'))
 
     # matchRes = re.findall('\"image\":\"(.*)\",\"ppi\"', str(msg.payload, 'utf-8'))
     matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
@@ -77,7 +77,7 @@ class MQTTClient(mqtt_client.Client):
     def on_connect(client, userdata, flags, rc):
         if rc == 0:
             print("Connected to MQTT Broker!")
-            client.subscribe("marsaii/#")    # 订阅$SYS/下的所有主题
+            client.subscribe("test/#")    # 订阅$SYS/下的所有主题
         else:
             print("Failed to connect, return code %d\n", rc)
 
@@ -86,9 +86,14 @@ class MQTTClient(mqtt_client.Client):
         # print(str(msg.payload, 'utf-8'))
 
         # matchRes = re.findall('\"image\":\"(.*)\",\"ppi\"', str(msg.payload, 'utf-8'))
-        matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
+        # matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
+        # matchRes = re.findall(b'\"image\" : \"(.*)\",\r\n\"label\" :', msg.payload)
+        matchRes = re.findall(b'\"image\" : \"(.*)\",', msg.payload)
+        # ,"label":{"data":
+        
 
         if len(matchRes) != 0:
+            print(msg.topic)
             # list_splitRes = matchRes[0].split('\\r\\n')
             # print("matchRes:", len(matchRes))
             # print("split result:", len(list_splitRes))
@@ -99,9 +104,16 @@ class MQTTClient(mqtt_client.Client):
             missing_padding = 4 - len(strNoNewLine) % 4
             if missing_padding:
                 strNoNewLine += b'=' * missing_padding
+
             imageData_bytes = base64.b64decode(strNoNewLine)
+            # filename = "F:/Pose/Workspace/Python/SPIN/wee.png"
+            # with open(filename, "wb") as f:
+            #     f.write(imageData_bytes)
+
             imageData_nparr = np.fromstring(imageData_bytes, np.uint8)
-            image = cv2.imdecode(imageData_nparr, -1)
+            image = cv2.imdecode(imageData_nparr, 1)
+            # cv2.imshow("cam1", image)
+            # cv2.waitKey(1)
             client.poseDetector.processFrame(image)
 
 
@@ -126,7 +138,7 @@ if __name__ == "__main__":
     client.on_connect = MQTTClient.on_connect    # 连接broker时broker响应的回调
     client.on_message = MQTTClient.on_message    # 接收到订阅消息时的回调
 
-    client.connect("192.168.1.100", 1883, 60)    # 连接到broker
+    client.connect("192.168.0.137", 1883, 60)    # 连接到broker
 
     # Blocking call that processes network traffic, dispatches callbacks and
     # handles reconnecting.

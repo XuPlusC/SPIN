@@ -371,7 +371,9 @@ if __name__ == "__main__":
     # cap = cv2.VideoCapture("rtsp://192.168.1.201:8554/ds-test")
     # cap = cv2.VideoCapture("http://192.168.1.201:8080/proxy/0.flv")
     # cap = cv2.VideoCapture("rtsp://cococat:f51e7e7951598caf878fb26dc67d58cf@192.168.162.95/video")
-    cap = cv2.VideoCapture("/home/pose/Videos/high.mp4")
+    # cap = cv2.VideoCapture("/home/pose/Videos/high.mp4")
+    cap = cv2.VideoCapture("C:/Users/kk/Downloads/test.mp4")
+
 
     list_cap = [cap]
 
@@ -387,13 +389,13 @@ if __name__ == "__main__":
     fourCC = cv2.VideoWriter_fourcc(*'MP4V')
     # out = cv2.VideoWriter("/home/pose/Videos/debug.mp4", fourCC, extracted_FPS, (2000, 500))
 
-    # read calibration result from file
-    K_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/K.txt")
-    R_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/R.txt")
-    T_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/T.txt")
+    # # read calibration result from file
+    # K_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/K.txt")
+    # R_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/R.txt")
+    # T_matrix = readMatrixFromFile("/home/pose/Workspace/Python/Test/T.txt")
 
-    # R_matrix_inv = np.linalg.inv(R_matrix)
-    R_matrix_transpose = np.transpose(R_matrix)
+    # R_matrix_inv = np.linalg.inv(R_matrix)6
+    # R_matrix_transpose = np.transpose(R_matrix)
     # R_matrix, _  = cv2.Rodrigues(R_matrix)
     # R_matrix = np.transpose(R_matrix)
     # C_matrix = np.matmul(-np.linalg.inv(R_matrix), T_matrix)
@@ -500,8 +502,8 @@ if __name__ == "__main__":
                         # final_image = frame_pose.draw_points_and_skeleton(image_bgr, adjusted_joints_coord, frame_pose.skeleton)
 
                         final_image = frame_pose.draw_points_and_skeleton(img_black.copy(), adjusted_joints_coord, frame_pose.skeleton)
-                        cv2.imwrite("/home/pose/Pictures/skeleton.jpg", final_image)
-                        cv2.imwrite("/home/pose/Pictures/origin.jpg", image_bgr)
+                        # cv2.imwrite("/home/pose/Pictures/skeleton.jpg", final_image)
+                        # cv2.imwrite("/home/pose/Pictures/origin.jpg", image_bgr)
                         final_image = np.concatenate((image_bgr, final_image), axis=1)
 
                         # compare stored pelvis coordinate
