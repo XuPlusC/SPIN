@@ -15,6 +15,7 @@ import base64
 import json
 import math
 import requests
+import time
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint', required=True, help='Path to pretrained checkpoint')
@@ -234,8 +235,16 @@ class PoseDetect:
         self.fall_down_frame_counter = 0
         self.fall_down_frame_threshold = 4
         self.fall_down_list = []
+
+        # This boolean member is used for sending alert only once when a new fall down event appears. Do not keep sending when person staying on the ground
+        # 此布尔量用于控制程序在一个跌倒事件发生时只发送一次警报。在跌倒的人尚未爬起时，程序仍然可以检测到目标处于跌倒状态，但是不应当一直发送警报，否则数据库会被填满。
+        self.b_send_fall_down_alert = False
+        # The number of people fallen down in the frame.
+        # When a falling event appears, the program will only send alert once; However, if more people fall down, the program should send alert no matter whether
+        # the already fallen people has stood up.
+        # 跌倒对象个数的计数器。
+        # 根据上一个布尔量，直到跌倒的对象爬起来之前，只发送一次跌倒警报；但是，当场景中出现更多的跌倒事件时，无论如何都需要发送新的警报。
         self.fall_down_target_counter = 0
-        self.b_send_fall_down_alert = False  # only send alert when new fall down appears. do not keep sending when person has already fallen on the ground
 
         self.image_showcase = 0
         self.origin_image = 0
@@ -485,9 +494,28 @@ class PoseDetect:
                         "alarmTime": datetime.datetime.now().strftime(PoseDetect.timeFormat_ISO)
                     }
                     # print(payload)
-                    r = requests.post(PoseDetect.url_http, headers=PoseDetect.headers, data=json.dumps(payload))
-                    print(r.status_code)
-                    print(r.content)
+                    while True:     # 一直循环，知道访问站点成功
+                        try:
+                            # 以下except都是用来捕获当requests请求出现异常时，
+                            # 通过捕获然后等待网络情况的变化，以此来保护程序的不间断运行
+                            r = requests.post(PoseDetect.url_http, headers=PoseDetect.headers, data=json.dumps(payload))
+                            print(r.status_code)
+                            print(r.content)
+                            # req = requests.get(company_url, headers = headers, timeout = 20)
+                            break
+                        except requests.exceptions.ConnectionError:
+                            print('ConnectionError -- please wait 1 seconds')
+                            time.sleep(1)
+                        except requests.exceptions.ChunkedEncodingError:
+                            print('ChunkedEncodingError -- please wait 1 seconds')
+                            time.sleep(1)
+                        except :
+                            print('Unfortunitely -- An Unknow Error Happened, Please wait 1 seconds')
+                            time.sleep(1)
+
+                    # r = requests.post(PoseDetect.url_http, headers=PoseDetect.headers, data=json.dumps(payload))
+                    # print(r.status_code)
+                    # print(r.content)
 
                 # color = (255, 0, 0) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)
                 color = (0, 0, 255) if (fall_down_list.count(box_index) != 0) else (255, 0, 0)

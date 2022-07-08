@@ -82,14 +82,15 @@ class MQTTClient(mqtt_client.Client):
             print("Failed to connect, return code %d\n", rc)
 
     def on_message(client, userdata, msg):
-        # print(msg.topic+" "+str(msg.payload))
-        # print(str(msg.payload, 'utf-8'))
+        # print(msg.topic + " " + str(msg.payload)[0:40] + " ....")
+        # print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
         # matchRes = re.findall('\"image\":\"(.*)\",\"ppi\"', str(msg.payload, 'utf-8'))
         # matchRes = re.findall(b'\"image\":\"(.*)\",\"label\"', msg.payload)
         matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
 
         if len(matchRes) != 0:
+            # print("successfully found base64 image!") 
             # list_splitRes = matchRes[0].split('\\r\\n')
             # print("matchRes:", len(matchRes))
             # print("split result:", len(list_splitRes))
@@ -125,11 +126,13 @@ if __name__ == "__main__":
     # # manual interface.
     # client.loop_forever()    # 保持永久连接
 
+    cv2.namedWindow("cam1", 0)
+
     client = MQTTClient(args.checkpoint)
     client.on_connect = MQTTClient.on_connect    # 连接broker时broker响应的回调
     client.on_message = MQTTClient.on_message    # 接收到订阅消息时的回调
 
-    client.connect("192.168.1.2", 1883, 60)    # 连接到broker
+    client.connect("192.168.1.3", 1883, 60)    # 连接到broker
 
     # Blocking call that processes network traffic, dispatches callbacks and
     # handles reconnecting.
