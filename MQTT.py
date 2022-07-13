@@ -13,38 +13,6 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--checkpoint', required=True, help='Path to pretrained checkpoint')
 
 
-# MQTT connection
-# by cococat 2022.3.17
-def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("Connected to MQTT Broker!")
-        client.subscribe("marsaii/#")    # 订阅$SYS/下的所有主题
-    else:
-        print("Failed to connect, return code %d\n", rc)
-
-
-def on_message(client, userdata, msg, poseDetector):
-    # print(msg.topic+" "+str(msg.payload))
-    # print(str(msg.payload, 'utf-8'))
-
-    # matchRes = re.findall('\"image\":\"(.*)\",\"ppi\"', str(msg.payload, 'utf-8'))
-    matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
-
-    if len(matchRes) != 0:
-        strNoNewLine = matchRes[0]
-        strNoNewLine = strNoNewLine.replace(b'\\r\\n', b'')
-        missing_padding = 4 - len(strNoNewLine) % 4
-        if missing_padding:
-            strNoNewLine += b'=' * missing_padding
-        imageData_bytes = base64.b64decode(strNoNewLine)
-        imageData_nparr = np.fromstring(imageData_bytes, np.uint8)
-        image = cv2.imdecode(imageData_nparr, -1)
-        poseDetector.processFrame(image)
-        # file = open('1.jpg', 'wb')
-        # file.write(imageData_bytes)
-        # file.close()
-
-
 def addCam():
     # url_http = "http://juntai.vip3gz.91tunnel.com/pose/free/alarm/pump"
     url_http = "http://127.0.0.1:8189/free/device"
@@ -85,46 +53,52 @@ class MQTTClient(mqtt_client.Client):
         # print(msg.topic + " " + str(msg.payload)[0:40] + " ....")
         # print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-        # matchRes = re.findall('\"image\":\"(.*)\",\"ppi\"', str(msg.payload, 'utf-8'))
         # matchRes = re.findall(b'\"image\":\"(.*)\",\"label\"', msg.payload)
-        matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
+        # matchRes = re.findall(b'\"image\":\"(.*)\",\"ppi\"', msg.payload)
 
-        if len(matchRes) != 0:
-            # print("successfully found base64 image!") 
-            # list_splitRes = matchRes[0].split('\\r\\n')
-            # print("matchRes:", len(matchRes))
-            # print("split result:", len(list_splitRes))
+        # if len(matchRes) != 0:
+        #     # print("successfully found base64 image!") 
+        #     # list_splitRes = matchRes[0].split('\\r\\n')
+        #     # print("matchRes:", len(matchRes))
+        #     # print("split result:", len(list_splitRes))
 
-            # strNoNewLine = re.sub(b'\\r\\n', '', matchRes[0])
-            strNoNewLine = matchRes[0]
-            strNoNewLine = strNoNewLine.replace(b'\\r\\n', b'')
-            missing_padding = 4 - len(strNoNewLine) % 4
-            if missing_padding:
-                strNoNewLine += b'=' * missing_padding
-            imageData_bytes = base64.b64decode(strNoNewLine)
-            imageData_nparr = np.fromstring(imageData_bytes, np.uint8)
-            image = cv2.imdecode(imageData_nparr, -1)
-            # cv2.imshow("wee", image)
-            # cv2.waitKey(1)
-            client.poseDetector.processFrame(image)
+        #     # strNoNewLine = re.sub(b'\\r\\n', '', matchRes[0])
+        #     strNoNewLine = matchRes[0]
+        #     strNoNewLine = strNoNewLine.replace(b'\\r\\n', b'')
+        #     missing_padding = 4 - len(strNoNewLine) % 4
+        #     if missing_padding:
+        #         strNoNewLine += b'=' * missing_padding
+        #     imageData_bytes = base64.b64decode(strNoNewLine)
+        #     imageData_nparr = np.fromstring(imageData_bytes, np.uint8)
+        #     image = cv2.imdecode(imageData_nparr, -1)
+        #     cv2.imshow("wee", image)
+        #     cv2.waitKey(1)
+        #     # client.poseDetector.processFrame(image)
+
+        try:
+            res = json.loads(msg.payload)
+            assert isinstance(res, dict)
+            assert not ({'image', 'label', 'posttime', 'source'} - res.keys())
+        except (json.JSONDecodeError, AssertionError) as e:
+            print(f'消息无法解析, 已丢弃->{e}')
+            return
+
+        image_string = res['image']
+        np_arr = np.frombuffer(base64.b64decode(image_string), np.uint8)
+        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        # for item in res['label']['data']:
+        #     cv2.rectangle(img, (item['x1'], item['y1']), (item['x2'], item['y2']), (0, 0, 0), thickness=3)
+        
+        # cv2.imshow('cam1', img)
+        client.poseDetector.processFrame(img)
+
+        key = cv2.waitKey(10)
+        if key == 113:
+            exit()
 
 
 if __name__ == "__main__":
     args = parser.parse_args()
-    
-    # poseDetector = pose_detect.PoseDetect(args.checkpoint)
-
-    # client = mqtt_client.Client()
-    # client.on_connect = on_connect    # 连接broker时broker响应的回调
-    # client.on_message = on_message    # 接收到订阅消息时的回调
-
-    # client.connect("192.168.1.100", 1883, 60)    # 连接到broker
-
-    # # Blocking call that processes network traffic, dispatches callbacks and
-    # # handles reconnecting.
-    # # Other loop*() functions are available that give a threaded interface and a
-    # # manual interface.
-    # client.loop_forever()    # 保持永久连接
 
     cv2.namedWindow("cam1", 0)
 
